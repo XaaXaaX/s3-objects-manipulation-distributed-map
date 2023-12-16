@@ -1,6 +1,3 @@
-.Ds_Store
-.vs
-
 *.js
 !jest.config.js
 *.d.ts
