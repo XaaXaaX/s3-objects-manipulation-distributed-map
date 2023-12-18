@@ -1,5 +1,5 @@
 import { Construct } from 'constructs';
-import { CustomState, Pass, StateMachine } from 'aws-cdk-lib/aws-stepfunctions';
+import { Chain, CustomState, DefinitionBody, Fail, Pass,  StateMachine, Succeed } from 'aws-cdk-lib/aws-stepfunctions';
 import { Bucket } from 'aws-cdk-lib/aws-s3';
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
@@ -23,89 +23,118 @@ export class DistributedMapStack extends Stack {
       destinationBucket: inputBucket,
     });
 
-    const definition = 
-      new CustomState(this, 'S3 Distributed Map State Machine', {
-        stateJson: {
-          Label: "Map",
-          MaxConcurrency: 1000,
-          ToleratedFailurePercentage: 100,
-          Next: "End",
-          Type: "Map",
-          Catch: [
-            {
-              ErrorEquals: [
-                "States.ItemReaderFailed"
-              ],
-              Next: "Fail"
-            }
-          ],
-          ItemBatcher: {
-            MaxItemsPerBatch: 5
-          },
-          ItemProcessor: {
-            ProcessorConfig: {
-              ExecutionType: "STANDARD",
-              Mode: "DISTRIBUTED"
-            },
-            StartAt: "ProcessObjects",
-            States: {
-              ProcessObjects: {
-                Type: "Map",
-                ItemsPath: "$.Items",
-                ItemProcessor: {
-                  ProcessorConfig: {
-                    Mode: "INLINE"
-                  },
-                  StartAt: "GetObjectFromBucket",
-                  States: {
-                    GetObjectFromBucket: {
-                      Type: "Task",
-                      Next: "TransformItem",
-                      Parameters: {
-                        Bucket: inputBucket.bucketName,
-                        "Key.$": "$.Key"
-                      },
-                      Resource: "arn:aws:states:::aws-sdk:s3:getObject"
-                    },
-                    TransformItem: {
-                      Type: "Pass",
-                      Next: "PublishItem",
-                      Parameters: {
-                        "output.$": "States.JsonMerge(States.StringToJson($.Body), States.StringToJson('{\"NewField\": \"MyValue\" }'), false)"
-                      },
-                      OutputPath: "$.output"
-                    },
-                    PublishItem: {
-                      Type: "Task",
-                      Resource: "arn:aws:states:::sns:publish",
-                      Parameters: {
-                        "Message.$": "$",
-                        TopicArn: topic.topicArn
-                      },
-                      End: true,
-                      ResultPath: null
-                    }
-                  }
-                },
-                End: true
-              }
-            }
-          },
-          ItemReader: {
-            Parameters: {
-              Bucket: inputBucket.bucketName
-            },
-            Resource: "arn:aws:states:::s3:listObjectsV2"
+    const distributedMap = new CustomState(this, 'S3 Distributed Map State Machine', {
+      stateJson: {
+        MaxConcurrency: 100,
+        ToleratedFailurePercentage: 100,
+        OutputPath: null,
+        Type: "Map",
+        Catch: [
+          {
+            ErrorEquals: [
+              "States.ItemReaderFailed"
+            ],
+            Next: "Fail"
           }
+        ],
+        ItemBatcher: {
+          MaxItemsPerBatch: 2,
+        },
+        ItemProcessor: {
+          ProcessorConfig: {
+            ExecutionType: "STANDARD",
+            Mode: "DISTRIBUTED"
+          },
+          StartAt: "ProcessObjects",
+          States: {
+            ProcessObjects: {
+              MaxConcurrency: 300,
+              ToleratedFailurePercentage: 100,
+              ItemsPath: "$.Items",
+              ResultPath: null,
+              OutputPath: null,
+              End: true,
+              Type: "Map",
+              Catch: [
+                {
+                  ErrorEquals: [
+                    "States.ItemReaderFailed"
+                  ],
+                  Next: "FailItem"
+                }
+              ],
+              ItemBatcher: {
+                MaxItemsPerBatch: 1,
+              },
+              ItemProcessor: {
+                ProcessorConfig: {
+                  ExecutionType: "STANDARD",
+                  Mode: "DISTRIBUTED"
+                },
+                StartAt: "ProcessItems",
+                States: {
+                  ProcessItems: {
+                    Type: "Map",
+                    ItemsPath: "$.Items",
+                    ItemProcessor: {
+                      ProcessorConfig: {
+                        Mode: "INLINE"
+                      },
+                      StartAt: "GetObjectFromBucket",
+                      States: {
+                        GetObjectFromBucket: {
+                          Type: "Task",
+                          Next: "TransformItem",
+                          Parameters: {
+                            Bucket: inputBucket.bucketName,
+                            "Key.$": "$.Key"
+                          },
+                          Resource: "arn:aws:states:::aws-sdk:s3:getObject"
+                        },
+                        TransformItem: {
+                          Type: "Pass",
+                          Next: "PublishItem",
+                          Parameters: {
+                            "output.$": "States.JsonMerge(States.StringToJson($.Body), States.StringToJson('{\"NewField\": \"MyValue\" }'), false)"
+                          },
+                          OutputPath: "$.output"
+                        },
+                        PublishItem: {
+                          Type: "Task",
+                          Resource: "arn:aws:states:::sns:publish",
+                          Parameters: {
+                            "Message.$": "$",
+                            TopicArn: topic.topicArn
+                          },
+                          End: true,
+                          ResultPath: null
+                        }
+                      }
+                    },
+                    End: true
+                  }
+                }
+              }
+            },
+            FailItem: {
+              Type: "Fail"
+            }
+          }
+        },
+        ItemReader: {
+          Parameters: {
+            Bucket: inputBucket.bucketName
+          },
+          Resource: "arn:aws:states:::s3:listObjectsV2"
         }
-      })
-    .next(new Pass(this, 'Fail'))
-    .next(new Pass(this, 'End'));
-
+      },
+    })
+    .next(new Pass(this, 'Fail'));
+    
     const statemachineName = "MapStateMachine";
 
     const stateMachine = new StateMachine(this, 'StateMachine', {
-      definition: definition,
+      definitionBody: DefinitionBody.fromChainable(distributedMap),
       stateMachineName: statemachineName,
     });
 
