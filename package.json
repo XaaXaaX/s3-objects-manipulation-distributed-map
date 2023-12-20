@@ -1,15 +1,12 @@
 {
   "name": "cdk",
   "version": "0.1.0",
-  "bin": {
-    "cdk": "bin/cdk.js"
-  },
   "scripts": {
     "build": "tsc",
-    "watch": "tsc -w",
-    "test": "jest",
-    "cdk": "cdk --app 'ts-node --prefer-ts-exts bin/distributed-map.ts'",
-    "cdk:dev": "yarn run cdk -- --profile serverless -c env=dev"
+    "cdk:entry": "cdk --app 'ts-node --prefer-ts-exts bin/distributed-map.ts'",
+    "cdk:deploy": "npm run cdk:entry -- --profile serverless -c env=dev deploy",
+    "cdk:synth": "npm run cdk:entry -- --profile serverless -c env=dev synth",
+    "cdk:destroy": "npm run cdk:entry -- --profile serverless -c env=dev destroy"
   },
   "devDependencies": {
     "@types/jest": "^29.5.8",

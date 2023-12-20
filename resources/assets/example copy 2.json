@@ -1,0 +1,11 @@
+{
+  "product": {
+    "id": "2",
+    "name": "Product Two Name",
+    "description": "Product Description",
+    "price": 2.45,
+    "currency": "USD",
+    "image": "http://example.com/image2.jpg",
+    "url": "http://example.com/product/2"
+  }
+}
